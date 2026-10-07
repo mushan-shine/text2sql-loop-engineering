@@ -64,6 +64,7 @@ class Generation:
     prompt: str
     example_ids: tuple[str, ...] = ()    # few-shot examples used (dynamic mode: per question)
     schema_tables: tuple[str, ...] = ()  # tables whose schema was shown
+    notes: str = ""                      # warehouse usage notes shown (knowledge mode)
 
 
 def select_few_shot(queries: list[dict], exclude_ids: set, n: int = 3, seed: int = 20260925,
@@ -97,10 +98,12 @@ def render_schema(catalog: SchemaCatalog, tables: tuple[str, ...]) -> str:
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
-# 创建prompt=规则+需要用到的表的说明+示例
+# 创建prompt=规则+需要用到的表的说明+示例+总结的知识
 def build_prompt(task: AgentTask, schema_text: str, examples: list[FewShotExample],
-                 oracle_hints: list[str] | None = None) -> str:
+                 oracle_hints: list[str] | None = None, notes: str = "") -> str:
     parts = [RULES, "", "Schema:", schema_text, ""]
+    if notes:  # warehouse usage notes mined from solved queries (agent/knowledge.py)
+        parts += [notes, ""]
     if examples:
         parts.append("Examples (from the same warehouse):")
         for ex in examples:
@@ -139,10 +142,12 @@ class FewShotGenerator:
     index: Any = None
     k: int = 4
     max_extra_tables: int = 6
+    knowledge: Any = None        # agent/knowledge.py WarehouseKnowledge: usage notes per question
 
     @property
     def prompt_version(self) -> str:
-        return PROMPT_VERSION_DYNAMIC if self.index is not None else PROMPT_VERSION
+        base = PROMPT_VERSION_DYNAMIC if self.index is not None else PROMPT_VERSION
+        return base + ("+kb" if self.knowledge is not None else "")
 
     def generate(self, task: AgentTask, tables: tuple[str, ...], oracle_hints: list[str] | None = None) -> Generation:
         """``oracle_hints`` carry GOLD annotations (BEAVER setting=1/2). Offline diagnostic analysis
@@ -159,9 +164,11 @@ class FewShotGenerator:
             extra = [t for h in hits for t in h.tables if t in self.catalog.tables and t not in tables]
             # 最多补 6 张
             tables = tuple(tables) + tuple(dict.fromkeys(extra))[: self.max_extra_tables]
+        # 根据问题检索表相关的知识，生成相关说明
+        notes = self.knowledge.notes_for(task.question, tables) if self.knowledge is not None else ""
         # 生成提示词
-        prompt = build_prompt(task, render_schema(self.catalog, tables), examples, oracle_hints)
+        prompt = build_prompt(task, render_schema(self.catalog, tables), examples, oracle_hints, notes)
         # 调用LLM，生成SQL
         r = self.client.complete(prompt, system=SYSTEM)
         sql, status = extract_sql(r.text)
-        return Generation(sql, r.text, status, r, prompt, tuple(e.source_id for e in examples), tuple(tables))
+        return Generation(sql, r.text, status, r, prompt, tuple(e.source_id for e in examples), tuple(tables), notes)

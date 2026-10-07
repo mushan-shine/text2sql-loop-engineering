@@ -45,6 +45,12 @@ few_shot:
   dynamic_max_sql_chars: 2500
   dynamic_max_extra_tables: 6
 
+knowledge:
+  # Usage notes mined from the training split by scripts/build_knowledge.py (agent/knowledge.py).
+  # off = no notes; on = notes added to the generation prompt (+kb).
+  mode: off
+  path: runs/knowledge/kb.json
+
 dev:
   # Development set: all prompt / model / parameter iteration happens here, never on
   # the evaluation sample. Excludes the evaluation sample and the few-shot examples;

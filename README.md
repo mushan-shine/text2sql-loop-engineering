@@ -289,3 +289,36 @@ python scripts/analyze_run.py <run_id>                  # 逐题对照标准答�
 python scripts/phase1.py dev --few-shot dynamic         # 单次生成
 python scripts/phase6.py --few-shot dynamic --max-repairs 4
 ```
+
+## 步骤 7：数仓使用说明
+
+**目的**：相似题示例只覆盖和新问题字面相近的几道题。把整个训练集里的用表习惯统计出来，作为通用知识补充给模型。
+
+**做法**
+
+- `agent/knowledge.py` + `scripts/build_knowledge.py`：离线从训练集（评测集和开发集以外的已解题）统计三类约定：
+  - 概念 → 常用表：问题里出现某个词时，已解题通常用哪些表（按 IDF 加权）；
+  - 相似表组：列名相似度 ≥ 0.5 的表，以及在同类问题里各自的使用比例；
+  - 关联约定：每对表常用的关联键，以及 INNER / LEFT JOIN 的比例。
+- 运行时每道题只取与它相关的几行（开发集上多数为 12–13 行），作为“数仓使用说明”放进 prompt，不含该题的任何标准答案信息。prompt 版本加 `+kb`。
+
+**效果**
+
+| 实验 | 条件 | 相似题示例 | + 使用说明 |
+|---|---|---|---|
+| 单次生成 | glm，开发集 | 答对 3，能执行 16 | 答对 **5**，能执行 16；token +3% |
+| 生成 + 内循环 | DeepSeek，开发集，最多修复 4 次 | 最终答对 8 | 两次运行：最终答对 9 和 8 |
+
+DeepSeek 相同配置的两次运行，30 题中有 13 题第 1 次生成的 SQL 不同，答对数差 1 题。开发集只有 30 题，1 题以内的差别要看作波动，不能当成提升。
+
+**运行**
+
+**Notebook**：分支 `step-07`，`notebooks/step07_usage_notes`。
+
+本地运行：
+
+```bash
+python scripts/build_knowledge.py                                   # 从训练集统计使用说明
+python scripts/phase1.py dev --few-shot dynamic --knowledge on
+python scripts/phase6.py --few-shot dynamic --knowledge on --max-repairs 4
+```
