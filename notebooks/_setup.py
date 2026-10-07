@@ -61,11 +61,16 @@ def run_script(script: str, *args: str) -> None:
 
 
 def run_tests(*args: str) -> int:
-    """pytest, from the project root (results printed below the cell)."""
-    import pytest
-    code = pytest.main(["-q", "-p", "no:cacheprovider", *args])
-    os.chdir(REPO)
-    return int(code)
+    """pytest in its own Python process, from the project root (results printed below the cell).
+
+    Not pytest.main(): inside the notebook's process pytest cannot import the project's packages from /Workspace,
+    while a separate `python -m pytest` behaves exactly like a local run.
+    """
+    import subprocess
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *map(str, args)],
+                       cwd=REPO, capture_output=True, text=True)
+    print(r.stdout + r.stderr)
+    return r.returncode
 
 
 def latest_run(folder: str, prefix: str = "", mode: str | None = None) -> str:
