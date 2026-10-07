@@ -353,3 +353,32 @@ python scripts/phase6.py --few-shot dynamic --knowledge on --max-repairs 4
 **运行**
 
 **Notebook**：分支 `step-08`，`notebooks/step08_collation_early_stop`。
+## 步骤 9：网页与部署
+
+**目的**：让每次运行、每道题的每一步都能在网页上看到，方便调试、演示和讲解。
+
+**做法**
+
+- **运行 Loop 页**（`app/app_pages/run_loop.py`、`app/runner.py`）：在网页上选题、选模型、选最大修复次数、选示例方式、开关使用说明，点“执行”。
+  - 后台线程运行，与命令行走同一条代码路径（`LoopController` + `run_arm`），网页和命令行跑出来的是同一个实验。
+  - 控制器每一步发出事件，页面每秒刷新时间线：检索（BM25 分数）、生成（完整 prompt）、执行、自检、观察、诊断、路由、修复（技能内部的确定性修改、给 LLM 的指令、修复前后 SQL 对比）。
+  - 标准答案判分在每题结束后才显示，并标注“Loop 不可见”。
+- **分析报告**（`app/report.py`）：运行结束后直接由事件生成，不调用 LLM：总体结果、逐题结局、各环节表现、成本、自动得出的发现，附 3 张图（修复前后对比、逐次尝试变化、逐题 × 逐次状态格子）。
+- **Loop Debug Console**（`app/dashboard.py`）：直接读 Delta，按运行和题目回放每次尝试的完整 trace。
+- **部署**（`scripts/build_app_bundle.py`、`scripts/deploy_app.py`、`app.yaml`）：
+  - 数据包（schema、示例、开发集、示例库、使用说明）含 BEAVER 内容，不入库，只上传到自己的工作区；
+  - LLM 的 key 只放在 secret scope；
+  - App 服务主体只授予项目 catalog 的权限；
+  - 评测集在网页上默认锁定（`SHT_ALLOW_EVAL=0`），配置冻结后才解锁。
+
+**运行**
+
+**Notebook**：分支 `step-09`，`notebooks/step09_web_console`。
+
+本地运行：
+
+```bash
+streamlit run app/streamlit_app.py                 # 本地
+python scripts/build_app_bundle.py                  # 打包 App 需要的数据
+python scripts/deploy_app.py                        # 部署为 Databricks App
+```

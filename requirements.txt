@@ -1,0 +1,10 @@
+# Databricks App runtime (app.yaml). Pinned to the versions the console was tested with.
+streamlit==1.64.0
+databricks-sdk==0.141.0
+databricks-sql-connector==4.5.0
+sqlglot==30.18.0
+PyYAML==6.0.3
+requests==2.34.2
+pandas==3.0.5
+pyarrow==25.0.1
+altair==6.3.0
