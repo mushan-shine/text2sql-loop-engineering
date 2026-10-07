@@ -125,3 +125,42 @@ python scripts/phase1.py build-dev     # 构建开发集
 python scripts/phase1.py dev           # 开发集上跑基线
 python scripts/phase1.py baseline      # 评测集（配置冻结后）
 ```
+
+## 步骤 3：可观测与评测分析
+
+**目的**：基线跑出来以后，要能回答两个问题：每道题具体发生了什么（trace），以及错在哪里、为什么错（失败分析）。后面每一项优化都从这里找方向。
+
+**做法**
+
+- **trace 与发布**（`dbx/publish.py`、`scripts/publish_run.py`）：
+  - 每次尝试写一行 `traces.execution_traces`，只放 Agent 自己看得到的内容；
+  - 用标准答案算出的对错、表召回率写进 `evaluation.*`，和 trace 物理分开。后面内循环会读 trace，这样它从存储层面就看不到答案；
+  - 汇总写进 `evaluation.runs` 和 MLflow；同一个 run_id 重复发布时先删旧数据，保证幂等。
+- **失败标注器**（`benchmark/beaver/subtasks.py`，只用于离线评测）：把生成的 SQL 和标准 SQL 都解析成语法树（`agent/sql_analysis.py`），逐项比较表、列、关联、常量、运算，给错题标出主因和多标签。
+- **干预实验**（`evaluation/intervention.py`）：每次只把标准答案中的一类信息（表、列、关联键、领域知识、查询拆解）提示给模型，看能不能修好。用来区分“缺信息”还是“模型能力不够”，结果只作上界参考。
+
+**效果**
+
+| 分析 | 条件 | 结果 |
+|---|---|---|
+| 标注器自检 | 标准 SQL 对照自身 | 开发集 30/30、评测样本 100/100 无误报；人工抽检 20 题一致率严格 75%、宽松 90% |
+| 失败主因 | glm，评测集 87 个失败 | 选表 76、列映射 7、执行 2、关联键 1、领域知识 1 |
+| 缺失的标准答案用表 | 同上 | 已检索到但没用上 132 次，没检索到 32 次 |
+| 干预：5 类信息全部提示 | glm，开发集错题 | 修好 0/30 |
+| 干预：5 类信息全部提示 | DeepSeek，开发集 27 道错题 | 修好 7/27 |
+
+两条结论决定了后面的方向：
+1. 缺失的表大多已经检索到了，问题主要在生成端“选错表、挂错列”，不在检索。
+2. glm 即使拿到标准答案的全部信息也修不好，瓶颈是模型能力；DeepSeek 拿到信息能修好一部分，说明对它来说信息不足才是主要问题，Loop 有发挥空间。
+
+**运行**
+
+**Notebook**：分支 `step-03`，`notebooks/step03_observability`。
+
+本地运行：
+
+```bash
+python scripts/publish_run.py runs/phase1/<run_id>          # 发布一次运行
+python scripts/phase3.py label runs/phase1/<run_id>          # 失败标注
+python scripts/phase3.py intervene runs/phase1/<dev_run_id>  # 干预实验（只在开发集）
+```
