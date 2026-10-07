@@ -1,0 +1,4 @@
+# Lets the notebooks' first cell run `%pip install -r requirements-notebook.txt` from either working directory:
+# a fresh notebook process starts in notebooks/ (this file, which includes the real list one level up), and after
+# `%run ./_setup` the process is in the project root (the real list itself) — e.g. when Run all is clicked again.
+-r ../requirements-notebook.txt
