@@ -8,6 +8,11 @@
 
 ## 怎么运行
 
+两条路线，用两个分开的 Git folder（运行结果互不覆盖）：
+
+- **快速上手**（约 40 分钟）：克隆到名为 `text2sql-quickstart` 的 Git folder，在 `main` 分支打开 `notebooks/quickstart`，Run all。一次跑完导入数据、基础版、完整版（生成端优化 + 内循环）、对比和发布，可选部署网页。
+- **分步学习**：克隆到另一个 Git folder，从分支 `step-00` 开始，每一步切到对应分支运行对应的 notebook。
+
 **全部在 Databricks 上完成，只需要浏览器**：在 Databricks 里用 Git folder 克隆本仓库，切到某一步的分支，打开对应的 notebook，Serverless 计算上点 Run all。
 详细步骤和每一步的预期结果见 [执行指南](docs/手动执行与截图指南.md)。
 
