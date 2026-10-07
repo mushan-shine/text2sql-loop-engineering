@@ -251,3 +251,41 @@ python scripts/phase6.py --verifier oracle --max-repairs 1    # 上界：用标�
 ```bash
 python scripts/verifier_eval.py        # 离线评估各信号的抓错率和误报率
 ```
+
+## 步骤 6：相似题示例
+
+**目的**：自检发现不了“能执行但答错”，那就从源头减少这类错误。先用错误分析找到主因。
+
+**错误分析**（`scripts/analyze_run.py`，DeepSeek，开发集，固定示例 + 内循环）
+
+- 26 道能执行但答错的题，22 道用的表和标准答案不同；
+- 标准答案用到、生成 SQL 没用的表共 41 次，其中 34 次已在检索出的 20 张候选表里；
+- 也就是说，问题不在检索，而在模型从一组相似的表里选错（这个数仓里有多张名字和列都很像的表）。
+
+**做法**（`agent/examples.py`）
+
+- 示例库：训练集的已解题（**排除评测集和开发集**），标准 SQL 经步骤 1 的改写规则处理、能解析、不超过 2,500 字符。
+- 每道题按问题文本用 BM25 检索最相似的 4 道已解题，替换固定的 3 个示例；这些示例用到的表（最多 6 张）补进 schema。
+- 同类问题在这个数仓里用哪些表、怎么关联，由已解题直接示范给模型。prompt 版本 `baseline-v3-dynfs`。
+
+**效果**
+
+| 实验 | 条件 | 固定示例 | 相似题示例 |
+|---|---|---|---|
+| 潜力验证 | 开发集，相似题前 5 道的用表覆盖标准答案用表 | — | 平均 88.5% |
+| 单次生成 | glm，开发集 | 答对 0，能执行 4 | 答对 **3**，能执行 16；token +11% |
+| 生成 + 内循环 | DeepSeek，开发集，最多修复 4 次 | 最终答对 3 | 最终答对 **8** |
+
+DeepSeek 一行的提升来自示例，而不是修复：两次运行里修复环节都没有新增答对的题。
+
+**运行**
+
+**Notebook**：分支 `step-06`，`notebooks/step06_dynamic_few_shot`。
+
+本地运行：
+
+```bash
+python scripts/analyze_run.py <run_id>                  # 逐题对照标准答案做错误分析
+python scripts/phase1.py dev --few-shot dynamic         # 单次生成
+python scripts/phase6.py --few-shot dynamic --max-repairs 4
+```

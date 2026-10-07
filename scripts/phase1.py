@@ -78,6 +78,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mode", choices=["build-dev", "dev", "pilot", "baseline"])
     ap.add_argument("--config", default="config/phase1.yaml")
+    ap.add_argument("--few-shot", choices=["static", "dynamic"], help="override few_shot.mode of the config")
     ap.add_argument("--limit", type=int, help="only the first N selected cases (smoke test)")
     ap.add_argument("--no-cache", action="store_true", help="do not replay cached LLM responses")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -90,6 +91,8 @@ def main() -> None:
     load_dotenv(ROOT / ".env")
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     b, lc, fs = cfg["beaver"], cfg["llm"], cfg["few_shot"]
+    if args.few_shot:
+        fs["mode"] = args.few_shot
 
     queries, tables_meta = load_from_local_json(b["local_dir"], b["split"])
     cases, _, _ = load_cases("local_json", b["split"], int(b["sample_size"]), int(b["sample_seed"]), b["local_dir"])
@@ -135,7 +138,11 @@ def main() -> None:
     meter = UsageMeter(max_calls=int(lc["max_calls"]), max_tokens=int(lc["max_tokens"]))
     client = make_client(lc, max_output_tokens=int(lc["max_output_tokens"]), meter=meter)
     chat = client if args.no_cache else CachingChatClient(client, Path(lc["cache"]))
-    generator = FewShotGenerator(chat, catalog, examples)
+    from agent.examples import build_generator_index
+    dev_ids = {str(c["id"]) for c in load_devset(dev_path)["cases"]} if dev_path.exists() else set()
+    index = build_generator_index(queries, eval_raw_ids, dev_ids, fs)
+    generator = FewShotGenerator(chat, catalog, examples, index=index, k=int(fs.get("dynamic_k", 4)),
+                                 max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)))
     retriever = BM25TableRetriever(catalog)
 
     log.info("mode=%s cases=%d model=%s top_k=%s few_shot=%d", args.mode, len(selected), client.model,

@@ -49,6 +49,7 @@ def main() -> None:
     ap.add_argument("--eval", action="store_true", help="confirm a run on the evaluation set (phase 7)")
     ap.add_argument("--max-repairs", type=int, default=1, help="repair rounds per question (attempts = +1)")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--few-shot", choices=["static", "dynamic"], help="override few_shot.mode of the config")
     ap.add_argument("--config", default="config/phase1.yaml")
     args = ap.parse_args()
     if args.split == "eval" and not args.eval:
@@ -64,6 +65,8 @@ def main() -> None:
 
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     b, lc, fs, d = cfg["beaver"], cfg["llm"], cfg["few_shot"], cfg["databricks"]
+    if args.few_shot:
+        fs["mode"] = args.few_shot
     queries, _ = load_from_local_json(b["local_dir"], b["split"])
     eval_cases = load_cases("local_json", b["split"], int(b["sample_size"]), int(b["sample_seed"]), b["local_dir"])[0]
     eval_ids = {c.case_id.split(":", 1)[1] for c in eval_cases}
@@ -88,8 +91,11 @@ def main() -> None:
     inner = make_client(lc, max_output_tokens=int(lc["max_output_tokens"]), meter=meter)
     client = CachingChatClient(inner, Path(lc["cache"]))
     policy = Policy(mode=args.policy, disabled={s for s in args.disable.split(",") if s})
+    from agent.examples import build_generator_index
+    dev_ids = {str(c["id"]) for c in load_devset(Path(cfg["dev"]["path"]))["cases"]}
     # 1. 生成器
-    generator = FewShotGenerator(client, catalog, examples)
+    generator = FewShotGenerator(client, catalog, examples, index=build_generator_index(queries, eval_ids, dev_ids, fs),
+                                 k=int(fs.get("dynamic_k", 4)), max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)))
     # 2. 循环控制器
     controller = LoopController(BM25TableRetriever(catalog), generator, dbx,
                                 Diagnoser(catalog, client), policy, RepairContext(catalog, client, examples),
@@ -101,7 +107,7 @@ def main() -> None:
           (f"-no_{args.disable.replace(',', '_')}" if args.disable else "")
     meta = {"split": args.split, "strategy": args.strategy, "verifier": args.verifier,
             "upper_bound": args.verifier == "oracle", "policy": args.policy, "disabled": args.disable,
-            "self_signals": list(SELF_SIGNALS), "verifier_version": VERIFIER_VERSION, "model": inner.model, "provider": inner.provider, "prompt_version": generator.prompt_version,
+            "self_signals": list(SELF_SIGNALS), "verifier_version": VERIFIER_VERSION, "model": inner.model, "provider": inner.provider, "prompt_version": generator.prompt_version, "few_shot": fs.get("mode", "static"),
             "diagnoser": DIAGNOSER_VERSION, "max_attempts": args.max_repairs + 1,
             "case_ids": [c.case_id for c in cases]}
     

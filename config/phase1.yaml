@@ -37,6 +37,13 @@ few_shot:
   seed: 20260925
   max_tables: 3
   max_sql_chars: 900
+  # static  = the fixed examples above (baseline-v2)
+  # dynamic = per question, the k most similar solved questions (agent/examples.py, baseline-v3-dynfs);
+  #           pool = dw questions minus the evaluation sample and the dev set; their tables join the schema
+  mode: static
+  dynamic_k: 4
+  dynamic_max_sql_chars: 2500
+  dynamic_max_extra_tables: 6
 
 dev:
   # Development set: all prompt / model / parameter iteration happens here, never on

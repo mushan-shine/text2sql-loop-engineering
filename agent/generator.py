@@ -20,6 +20,7 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
+from typing import Any
 
 import sqlglot
 
@@ -123,24 +124,44 @@ def extract_sql(text: str) -> tuple[str, str]:
     return body.rstrip().rstrip(";").strip(), "OK"
 
 
+PROMPT_VERSION_DYNAMIC = "baseline-v3-dynfs"
+
+
 @dataclass
 class FewShotGenerator:
-    """Retrieved schema + fixed few-shot examples + question -> one SQL (no retry)."""
+    """``index`` (agent/examples.py ExampleIndex) switches to dynamic few-shot: the ``k`` solved questions most
+    similar to the new one replace the fixed examples, and the tables they use are added to the schema shown
+    (up to ``max_extra_tables``), so the model sees which tables this warehouse uses for such questions."""
 
     client: ChatClient
     catalog: SchemaCatalog
     examples: list[FewShotExample]
+    index: Any = None
+    k: int = 4
+    max_extra_tables: int = 6
 
     @property
     def prompt_version(self) -> str:
-        return PROMPT_VERSION
+        return PROMPT_VERSION_DYNAMIC if self.index is not None else PROMPT_VERSION
 
     def generate(self, task: AgentTask, tables: tuple[str, ...], oracle_hints: list[str] | None = None) -> Generation:
         """``oracle_hints`` carry GOLD annotations (BEAVER setting=1/2). Offline diagnostic analysis
         only (evaluation/intervention.py) — the agent, loop and experiments never pass them."""
+        examples = self.examples
+        # 只有 dynamic 模式才有示例库；static 模式 index 为 None，整段跳过。主要作用是看相似题怎么做的
+        if self.index is not None:
+            # 从已解题里，按问题文本 BM25 找最相似的 k=4 道
+            # hits 里每一项是 PoolEntry，有两个字段：example（问题和 SQL）和 tables（这道题 SQL 里用到的表，建库时就已解析好）
+            hits = self.index.top(task.question, self.k)
+            # 用这 4 道题（问题 + SQL）替换固定的 3 个示例
+            examples = [h.example for h in hits]
+            # 把相似题用到的表摊成一个列表，只有 schema 里真实存在、且检索结果中还没有的表才加进来
+            extra = [t for h in hits for t in h.tables if t in self.catalog.tables and t not in tables]
+            # 最多补 6 张
+            tables = tuple(tables) + tuple(dict.fromkeys(extra))[: self.max_extra_tables]
         # 生成提示词
-        prompt = build_prompt(task, render_schema(self.catalog, tables), self.examples, oracle_hints)
+        prompt = build_prompt(task, render_schema(self.catalog, tables), examples, oracle_hints)
         # 调用LLM，生成SQL
         r = self.client.complete(prompt, system=SYSTEM)
         sql, status = extract_sql(r.text)
-        return Generation(sql, r.text, status, r, prompt, tuple(e.source_id for e in self.examples), tuple(tables))
+        return Generation(sql, r.text, status, r, prompt, tuple(e.source_id for e in examples), tuple(tables))
