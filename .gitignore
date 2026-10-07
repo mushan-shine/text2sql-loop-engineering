@@ -1,0 +1,10 @@
+.env
+__pycache__/
+.pytest_cache/
+runs/
+data/beaver/
+*.parquet
+data/beaver_db/
+reports/
+app/bundle/
+course_data/

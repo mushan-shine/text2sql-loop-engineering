@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "text2sql-loop-engineering"
+version = "0.1.0"
+description = "Self-healing Text-to-SQL agent on Databricks, built step by step: BEAVER benchmark, inner loop (self-check, diagnosis, targeted repair), outer loop"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "sqlglot>=25.0",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+# Runs from a workstation: MySQL is BEAVER's official engine (the reference),
+# Databricks SQL Warehouse is the target engine.
+local = [
+    "pymysql>=1.1",
+    "databricks-sql-connector>=3.0",
+    "databricks-sdk>=0.30",
+    "datasets>=2.18",
+]
+dev = ["pytest>=8.0"]
+
+[tool.hatch.build.targets.wheel]
+# The platform helpers package is named `dbx`, not `databricks`: a top-level
+# `databricks` package would shadow `databricks.sql` and `databricks.sdk`.
+packages = ["execution", "dbx"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"

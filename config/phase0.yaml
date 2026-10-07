@@ -1,0 +1,50 @@
+# Phase 0 — BEAVER → Databricks Qualification.
+# Every value can be overridden on the CLI (scripts/phase0.py --help).
+
+databricks:
+  profile: DEFAULT            # ~/.databrickscfg profile (host + auth)
+  http_path: null             # null = use DATABRICKS_HTTP_PATH or the first SQL warehouse
+  catalog: text2sql_loop
+  # Free Edition may refuse CREATE CATALOG. If so, set this to an existing
+  # catalog (usually `workspace`); schema names stay the same.
+  fallback_catalog: workspace
+  statement_timeout_s: 120
+
+# Unity Catalog layout (project schemas). BEAVER data tables are replicated
+# into one schema per BEAVER `db`, named exactly like the MySQL database so
+# that gold SQL runs unmodified.
+schemas:
+  benchmark: benchmark
+  traces: traces
+  evaluation: evaluation
+
+beaver:
+  source: huggingface         # huggingface | local_json
+  local_dir: data/beaver      # used when source=local_json (dev.json + dev_tables.json per split)
+  split: dw
+  sample_size: 100            # 50–100 for phase 0
+  sample_seed: 77             # identical to BEAVER's data/download_hf.py sampling
+
+reference_engine:             # BEAVER's official execution engine = oracle
+  kind: mysql
+  host: localhost
+  port: 3306
+  user_env: MYSQL_USER        # credentials are read from the environment / .env
+  password_env: MYSQL_PASSWORD
+  timeout_s: 120
+
+# Execution-environment choices. They are global (identical for gold SQL and,
+# later, generated SQL) and never touch the SQL text.
+environment:
+  # MySQL `_ci` collations compare strings case-insensitively. Mirror that with
+  # Databricks UTF8_LCASE collation on the corresponding columns.
+  collation_policy: mirror_mysql_ci   # mirror_mysql_ci | binary
+  # MySQL (non-strict expressions) yields NULL on x/0, Databricks ANSI mode raises.
+  ansi_mode: false
+
+qualification:
+  stability_repeats: 3        # executions per gold SQL on each engine (result cache disabled)
+  try_adapter: true           # apply documented MySQL→Databricks rules (benchmark/beaver/adapter.py) to failing cases
+  # Adapted SQL that reproduces the MySQL gold result is recorded, but is only
+  # admitted to PRIMARY evaluation when this is true.
+  admit_validated_adaptations: true   # decision B (2026-09-25): documented + result-validated rule adaptations are PRIMARY
