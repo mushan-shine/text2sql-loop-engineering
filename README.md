@@ -164,3 +164,52 @@ python scripts/publish_run.py runs/phase1/<run_id>          # 发布一次运行
 python scripts/phase3.py label runs/phase1/<run_id>          # 失败标注
 python scripts/phase3.py intervene runs/phase1/<dev_run_id>  # 干预实验（只在开发集）
 ```
+
+## 步骤 4：内循环基础版
+
+**目的**：第一次生成失败时，让 Agent 在**看不到标准答案**的前提下，自己发现失败、判断原因、有针对性地修复。
+
+**流程**（`loop_engineer/controller.py`）
+
+```
+执行 → 自检 ─通过或次数用完→ 选出最终答案
+          └未通过→ 观察 → 诊断 → 路由 → 修复技能 → 下一次尝试
+```
+
+**做法**
+
+- **自检 v1**（`verifier.py`）：只看执行层面的 5 个信号：没有 SQL、执行报错、结果过大、空结果、整列为空。“通过”只表示没发现问题，不代表答案正确。
+- **观察**（`observer.py`）：只按白名单读取尝试记录里的 12 个字段，并从报错文本中解析出错误类别、找不到的列和别名、数据库给出的候选列、不存在的表。用白名单而不是黑名单，标准答案相关的字段天然进不来。
+- **诊断**（`diagnose.py`）：规则优先，规则判断不了才调用 LLM。核心规则是：列找不到时，在 schema 里查这一列属于哪些表——在 SQL 已用的表里，是别名挂错；在检索到但没用的表里，是漏用了表。
+- **路由**（`policy.py`）：失败类型 → 技能的映射写成字典，禁用某个技能时退回 RepairSQL。
+- **5 个修复技能**（`skills/`）：先做不需要 LLM 的确定性修改，解决不了的部分再带着定向指令调用一次 LLM。
+  - SchemaSearch（列映射）：按作用域把挂错别名的列改到唯一拥有它的表；如果改完后关联条件变成 `x = x`，撤回这处修改。
+  - RetrieveAgain（选表）、FindJoinPath（关联键）、ReplanQuery（查询拆解）、RepairSQL（执行错误、兜底）。
+- **最终答案**：最后一个自检通过的 > 最后一个能执行的 > 最后一次。
+- **防泄露**：测试强制诊断、路由、观察和修复模块不能导入基准与评测代码；判分在 Loop 返回之后才做（`evaluation/loop_run.py`）。
+
+**效果**
+
+| 实验 | 条件 | 结果 |
+|---|---|---|
+| 诊断准确率 | 评测集 87 个失败，参照失败标注器 | 整体严格 40.2% / 宽松 66.7%；规则判断的 68 个宽松 76.5%；规则判断不了、交给 LLM 的 19 个严格 0/19 |
+| 规则覆盖率 | glm，开发集 | 27 次诊断中 26 次由规则完成 |
+| 修复技能单独评测 | glm，开发集 30 个失败 | 能执行 4 → 8 |
+| 完整内循环 | glm，开发集，最多修复 1 次 | 能执行 4 → 9，答对 0 → 0；自检拦下 27、漏报 3 |
+
+**踩过的坑**：SchemaSearch 一开始会把关联条件改成 `sd.X = sd.X`，SQL 能执行但两张表失去关联，答案是错的，统计出的“能执行”因此虚高（4 → 10，修正后 4 → 8）。加了“改完变成 `x = x` 就撤回”的守卫，并补了回归测试。
+
+修复让更多 SQL 能跑通，但答对的题没有增加：glm 的干预实验已经表明它受限于模型能力。另外，能执行但答错的题，v1 的自检全部放行，进不了修复环节。下一步加强自检。
+
+**运行**
+
+**Notebook**：分支 `step-04`，`notebooks/step04_inner_loop`。
+
+本地运行：
+
+```bash
+python scripts/phase4.py runs/phase1/<run_id> --llm   # 诊断准确率（需先跑步骤 3 的 label）
+python scripts/phase5.py runs/phase1/<dev_run_id>       # 修复技能单独评测
+python scripts/phase6.py --max-repairs 1                      # 内循环，开发集
+python scripts/phase6.py --verifier oracle --max-repairs 1    # 上界：用标准答案当自检器
+```
