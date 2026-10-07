@@ -45,5 +45,5 @@ def test_most_similar_first_and_example_tables_join_the_schema():
     g = gen.generate(AgentTask("dw:9", "average enrollment for each department", "dw"), ("sis_department",))
     assert g.example_ids == ("1",) and g.schema_tables == ("sis_department", "subject_offered")
     assert "TABLE dw.subject_offered" in chat.prompts[0] and "AVG(s.NUM_ENROLLED)" in chat.prompts[0]
-    assert gen.prompt_version == "baseline-v3-dynfs"
-    assert FewShotGenerator(chat, CAT, []).prompt_version == "baseline-v2"
+    assert gen.prompt_version == "baseline-v3.1-dynfs"
+    assert FewShotGenerator(chat, CAT, []).prompt_version == "baseline-v2.1"

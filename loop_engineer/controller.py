@@ -52,6 +52,12 @@ class LoopConfig:
     max_result_rows: int = 500_000
 
 
+def _same_sql(a: str | None, b: str | None) -> bool:
+    """Equal up to whitespace and a trailing semicolon: re-executing it cannot change the outcome."""
+    norm = lambda x: " ".join((x or "").split()).rstrip(";").strip()
+    return norm(a) == norm(b)
+
+
 @dataclass
 class LoopResult:
     attempts: list[dict[str, Any]]
@@ -200,6 +206,12 @@ class LoopController:
                  parse_status=nxt["parse_status"], latency_ms=nxt.get("llm_latency_ms") or 0,
                  diag_tokens=nxt.get("diag_tokens") or 0,
                  tokens=int(nxt.get("input_tokens") or 0) + int(nxt.get("output_tokens") or 0), details=details)
+            # the repair reproduced a SQL that already ran: executing it again gives the same result, so stop
+            repeat = next((a["attempt_id"] for a in attempts if _same_sql(a["generated_sql"], nxt["generated_sql"])), None)
+            if repeat is not None:
+                attempt["stop_reason"] = f"repair repeated the SQL of attempt {repeat}"
+                emit("stop", attempt_id=n, repeated_attempt=repeat, reason=attempt["stop_reason"])
+                break
             attempt = nxt
         passed = [i for i, a in enumerate(attempts) if a["verifier_decision"] == "PASS"]
         executed = [i for i, a in enumerate(attempts) if a["execution_status"] == "SUCCESS"]

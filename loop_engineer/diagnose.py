@@ -38,7 +38,7 @@ EXECUTION = "EXECUTION_FAILURE"
 UNKNOWN = "UNKNOWN"
 FAILURE_TYPES = (TABLE_RETRIEVAL, COLUMN_MAPPING, JOIN_KEY, DOMAIN_KNOWLEDGE, QUERY_DECOMPOSITION, EXECUTION)
 
-DIAGNOSER_VERSION = "diagnoser-v1"
+DIAGNOSER_VERSION = "diagnoser-v1.1"   # v1 + collation mismatch in UNION
 
 # engine error classes that are SQL-level problems (fixable without new schema knowledge)
 _SQL_LEVEL = {"PARSE_SYNTAX_ERROR", "MISSING_AGGREGATION", "MISSING_GROUP_BY", "DATATYPE_MISMATCH",
@@ -115,6 +115,13 @@ def diagnose_by_rules(obs: Observation, catalog: SchemaCatalog) -> Diagnosis | N
     if obs.execution_status == "TOO_MANY_ROWS":
         return Diagnosis(JOIN_KEY, 0.6, "result exploded beyond the row limit: likely a missing or wrong join key",
                          "rule", {"signal": "too_many_rows"})
+
+    # UNION of a UTF8_LCASE table column with a plain STRING (CAST(NULL AS STRING), a literal, ...):
+    # the engine names the collation, so the fix is known without an LLM diagnosis
+    if cls == "INCOMPATIBLE_COLUMN_TYPE" and "COLLATE" in (obs.execution_error or "").upper():
+        return Diagnosis(EXECUTION, 0.9, "UNION combines a UTF8_LCASE string column with a plain STRING value "
+                         "(e.g. CAST(NULL AS STRING) or a string literal)", "rule",
+                         {"signal": "collation_mismatch", "error_class": cls})
 
     if obs.execution_status == "ERROR":
         if cls in _SQL_LEVEL or cls is None or "window frame" in (obs.execution_error or "").lower():

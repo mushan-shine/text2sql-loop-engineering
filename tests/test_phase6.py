@@ -218,3 +218,44 @@ def test_numeric_inconsistency_triggers_a_replan():
     a1 = res.attempts[0]
     assert a1["verifier_decision"] == "FAIL" and a1["verifier_signals"] == ["avg_outside_min_max"]
     assert a1["repair_skill"] == "ReplanQuery" and "inconsistent" in chat.prompts[1]
+
+
+UNION_SQL = ("SELECT d.DEPARTMENT_NAME, d.DEPARTMENT_CODE FROM SIS_DEPARTMENT d UNION ALL "
+             "SELECT d.DEPARTMENT_NAME, CAST(NULL AS STRING) FROM SIS_DEPARTMENT d")
+COLLATION_ERR = ('[INCOMPATIBLE_COLUMN_TYPE] UNION can only be performed on tables with compatible column types. '
+                 'The second column of the second table is "STRING" type which is not compatible with '
+                 '"STRING COLLATE UTF8_LCASE" at the same column of the first table.')
+
+
+class CollationExec(Exec):
+    """UTF8_LCASE columns: a UNION with CAST(NULL AS STRING) fails, a bare NULL works (dev case dw_1516)."""
+
+    def execute(self, sql, db, max_rows=None):
+        self.calls.append(sql)
+        if "CAST(NULL AS STRING)" in sql:
+            return ExecutionResult("databricks", "ERROR", error=COLLATION_ERR, error_class="INCOMPATIBLE_COLUMN_TYPE")
+        return ExecutionResult("databricks", "SUCCESS", self.rows, ["a", "b"])
+
+
+def test_union_collation_mismatch_is_repaired_without_llm():
+    chat = Chat(lambda n: f"```sql\n{UNION_SQL}\n```")
+    res = controller(chat, ex=CollationExec()).run(TASK, SelfVerifier())
+    a1, a2 = res.attempts
+    assert a1["failure_type"] == "EXECUTION_FAILURE" and '"collation_mismatch"' in a1["repair_hints"]
+    assert a1["repair_skill"] == "RepairSQL" and a2["used_llm"] is False
+    assert "CAST(NULL AS STRING)" not in a2["generated_sql"] and a2["execution_status"] == "SUCCESS"
+    assert len(chat.prompts) == 1  # generation only: neither diagnosis nor repair called the LLM
+
+
+def test_a_repair_that_repeats_an_earlier_sql_stops_the_loop():
+    always_err = Exec()
+    always_err.execute = lambda sql, db, max_rows=None: (always_err.calls.append(sql) or ExecutionResult(
+        "databricks", "ERROR", error="[DATATYPE_MISMATCH] bad", error_class="DATATYPE_MISMATCH"))
+    chat = Chat(lambda n: "```sql\nSELECT 1 FROM SIS_DEPARTMENT\n```")  # the "repair" returns the same query
+    events = []
+    ctl = LoopController(BM25TableRetriever(CAT), FewShotGenerator(chat, CAT, []), always_err, Diagnoser(CAT),
+                         Policy(), RepairContext(CAT, chat), LoopConfig(top_k=2, max_attempts=5))
+    res = ctl.run(TASK, SelfVerifier(), on_event=lambda step, p: events.append(step))
+    assert len(res.attempts) == 1 and len(always_err.calls) == 1  # not re-executed 4 more times
+    assert res.attempts[0]["stop_reason"] == "repair repeated the SQL of attempt 1"
+    assert "stop" in events and events[-1] == "final"
