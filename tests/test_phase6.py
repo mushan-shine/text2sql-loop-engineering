@@ -178,3 +178,43 @@ def test_generic_retry_event_carries_its_prompt_and_instruction():
     rep = dict(events)["repair"]
     assert "observe" not in dict(events)  # the generic arm does not observe / diagnose
     assert rep["details"]["instruction"] == GENERIC_INSTRUCTION and "(not diagnosed)" in rep["details"]["prompt"]
+
+
+TAUT = ("SELECT d.DEPARTMENT_NAME, AVG(s.NUM_ENROLLED) FROM SIS_DEPARTMENT d "
+        "JOIN SUBJECT_OFFERED s ON d.DEPARTMENT_CODE = d.DEPARTMENT_CODE GROUP BY d.DEPARTMENT_NAME")
+GOOD = BAD.replace("d.NUM_ENROLLED", "s.NUM_ENROLLED")
+
+
+def test_semantic_self_check_closes_the_loop_on_a_join_tautology():
+    """Runs and returns rows, yet the join condition compares a column with itself: the v2 self-verifier
+    fails it, diagnosis routes to FindJoinPath and the repair prompt names the problem."""
+    chat = Chat(lambda n: f"```sql\n{TAUT}\n```" if n == 1 else f"```sql\n{GOOD}\n```")
+    events = []
+    res = controller(chat).run(TASK, SelfVerifier(), on_event=lambda s, p: events.append((s, p)))
+    a1, a2 = res.attempts
+    assert a1["execution_status"] == "SUCCESS" and a1["verifier_decision"] == "FAIL"
+    assert a1["verifier_signals"] == ["join_tautology"] and a1["failure_type"] == "JOIN_KEY_FAILURE"
+    assert a1["repair_skill"] == "FindJoinPath" and "compares a column with itself" in chat.prompts[1]
+    assert a2["verifier_decision"] == "PASS"
+    assert dict(events)["observe"]["verifier_signals"] == ["join_tautology"]
+
+
+def test_v1_signal_set_keeps_the_old_behaviour():
+    from loop_engineer.verifier import BASIC_SIGNALS
+    chat = Chat(lambda n: f"```sql\n{TAUT}\n```")
+    res = controller(chat).run(TASK, SelfVerifier(signals=BASIC_SIGNALS))
+    assert len(res.attempts) == 1 and res.attempts[0]["verifier_decision"] == "PASS"
+
+
+def test_numeric_inconsistency_triggers_a_replan():
+    """AVG outside [MIN, MAX] of the same column cannot be right: the self-verifier fails it without any gold,
+    and the diagnosis routes it to ReplanQuery with the inconsistency in the prompt."""
+    sql = ("SELECT d.DEPARTMENT_NAME, AVG(s.NUM_ENROLLED), MIN(s.NUM_ENROLLED), MAX(s.NUM_ENROLLED) "
+           "FROM SIS_DEPARTMENT d JOIN SUBJECT_OFFERED s ON d.DEPARTMENT_CODE = s.DEPARTMENT_CODE "
+           "GROUP BY d.DEPARTMENT_NAME")
+    chat = Chat(lambda n: f"```sql\n{sql}\n```" if n == 1 else f"```sql\n{GOOD}\n```")
+    ex = Exec(rows=[("Math", 50.0, 1, 9)])
+    res = controller(chat, ex=ex).run(TASK, SelfVerifier())
+    a1 = res.attempts[0]
+    assert a1["verifier_decision"] == "FAIL" and a1["verifier_signals"] == ["avg_outside_min_max"]
+    assert a1["repair_skill"] == "ReplanQuery" and "inconsistent" in chat.prompts[1]

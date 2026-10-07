@@ -47,6 +47,19 @@ _SQL_LEVEL = {"PARSE_SYNTAX_ERROR", "MISSING_AGGREGATION", "MISSING_GROUP_BY", "
               "AMBIGUOUS_REFERENCE", "NO_SQL"}
 
 
+# semantic self-verifier signal -> (failure type, confidence); the policy then routes as usual
+_VERIFIER_TYPES = {
+    "join_tautology": (JOIN_KEY, 0.85),          # -> FindJoinPath
+    "join_without_condition": (JOIN_KEY, 0.85),  # -> FindJoinPath
+    "missing_grouping": (QUERY_DECOMPOSITION, 0.8),  # -> ReplanQuery
+    "rounding": (EXECUTION, 0.8),                # -> RepairSQL (small, local change)
+    # numeric inconsistencies: related statistics computed over different row sets -> re-plan the computation
+    "avg_outside_min_max": (QUERY_DECOMPOSITION, 0.75), "min_greater_than_max": (QUERY_DECOMPOSITION, 0.75),
+    "std_var_mismatch": (QUERY_DECOMPOSITION, 0.75), "std_exceeds_range": (QUERY_DECOMPOSITION, 0.75),
+    "negative_statistic": (EXECUTION, 0.75), "count_not_integer": (EXECUTION, 0.75),
+}
+
+
 @dataclass(frozen=True)
 class Diagnosis:
     failure_type: str
@@ -109,6 +122,13 @@ def diagnose_by_rules(obs: Observation, catalog: SchemaCatalog) -> Diagnosis | N
                              {"signal": "sql_error", "error_class": cls})
         return Diagnosis(EXECUTION, 0.6, f"engine error {cls}", "rule", {"signal": "sql_error", "error_class": cls})
 
+    # ran, but the self-verifier's semantic checks found a structural problem (verifier.py / checks.py)
+    for f in obs.verifier_findings:
+        if f.get("signal") in _VERIFIER_TYPES:
+            ftype, conf = _VERIFIER_TYPES[f["signal"]]
+            return Diagnosis(ftype, conf, f.get("hint") or f.get("message") or f["signal"], "rule",
+                             {"signal": f["signal"], "verifier_findings": list(obs.verifier_findings),
+                              **(f.get("evidence") or {})})
     return None  # ran successfully: no explicit signal
 
 
