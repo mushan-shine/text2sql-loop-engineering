@@ -1,0 +1,54 @@
+# Phase 1 — Few-shot baseline (BEAVER setting=0, one attempt per case, no retry).
+
+databricks:
+  profile: DEFAULT
+  http_path: null
+  catalog: text2sql_loop
+  statement_timeout_s: 120
+  max_result_rows: 500000     # larger results are treated as a failed execution
+  ansi_mode: false            # same execution environment as phase 0
+
+beaver:
+  split: dw
+  db: dw
+  local_dir: data/beaver
+  sample_size: 100            # the frozen phase-0 sample (seed 77)
+  sample_seed: 77
+
+llm:
+  provider: zhipu   # deepseek / deepseek-flash
+  model: glm-4-flash          # decision 1c (2026-09-25); overridable with ZHIPU_MODEL
+  max_output_tokens: 2048
+  max_calls: 400              # hard budget per run
+  max_tokens: 3000000
+  cache: runs/phase1/llm_cache.jsonl
+
+retrieval:
+  method: bm25
+  # Tuned on 300 non-evaluation dw questions (random.Random(20260925)), never on the
+  # evaluation sample: k=10 recall 0.73, k=15 0.84, k=20 0.91 (all gold tables in
+  # 67% of questions), k=25 0.94, k=30 0.95. k=20 is the knee.
+  top_k: 20
+  examples_per_column: 3
+
+few_shot:
+  # Drawn from dw questions NOT in the evaluation sample.
+  n_examples: 3
+  seed: 20260925
+  max_tables: 3
+  max_sql_chars: 900
+
+dev:
+  # Development set: all prompt / model / parameter iteration happens here, never on
+  # the evaluation sample. Excludes the evaluation sample and the few-shot examples;
+  # gold = MySQL result of the gold SQL, kept only if reproducible on Databricks.
+  path: runs/phase1/devset.json
+  n_cases: 30
+  seed: 20260926
+  max_candidates: 200
+
+pilot:
+  # Historical: the first 20-case pilot (prompt baseline-v1) ran on evaluation cases.
+  # After it, iteration moved to the dev set (decision D2).
+  n_cases: 20
+  seed: 20260925
