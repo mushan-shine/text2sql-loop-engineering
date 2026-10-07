@@ -1,0 +1,20 @@
+# Databricks App: Loop Debug Console + live "Run loop" page.
+# Deployed with scripts/deploy_app.py (uploads the code + app/bundle, then deploys).
+command: ["streamlit", "run", "app/streamlit_app.py"]
+
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  # API keys come from the app's secret resources, never from code or the bundle.
+  - name: ZHIPUAI_API_KEY
+    valueFrom: zhipu-key
+  - name: DEEPSEEK_API_KEY
+    valueFrom: deepseek-key
+  - name: SHT_CATALOG
+    value: text2sql_loop
+  # Decision D2: the evaluation set stays locked until the configuration is frozen.
+  - name: SHT_ALLOW_EVAL
+    value: "0"
+  # 0 = no limit on questions per click (cost scales with the selection; glm-4-flash is free)
+  - name: SHT_MAX_CASES_PER_RUN
+    value: "0"
