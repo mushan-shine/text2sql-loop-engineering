@@ -48,3 +48,8 @@ qualification:
   # Adapted SQL that reproduces the MySQL gold result is recorded, but is only
   # admitted to PRIMARY evaluation when this is true.
   admit_validated_adaptations: true   # decision B (2026-09-25): documented + result-validated rule adaptations are PRIMARY
+
+course_data:
+  # Course data package (scripts/load_course_data.py): the step-1 result as Delta-ready files, so a
+  # Databricks-only setup needs neither MySQL nor the replication run.
+  repo: MuShan795/text2sql-loop-engineering-data

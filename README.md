@@ -55,3 +55,36 @@ pip install -e ".[local,dev]"
 cp .env.example .env        # 填 MySQL 和 LLM 的 key；Databricks 认证用 ~/.databrickscfg
 pytest
 ```
+
+## 步骤 1：数据底座
+
+**目的**：BEAVER 官方用 MySQL 执行标准 SQL，本项目跑在 Databricks 上。换了引擎，标准答案还成不成立？这一步不做，后面所有准确率都不可信。
+
+**做法**
+
+1. 下载 BEAVER（HuggingFace 门控数据集，需要自己申请访问），在本地 MySQL 还原，作为参照引擎（`scripts/fetch_beaver_db.py`）。
+2. 把 dw 库的 97 张表复制到 Delta（`benchmark/beaver/replicate.py`）：按列映射类型；MySQL 的 `_ci`（不区分大小写）排序规则映射为 Databricks 的 `UTF8_LCASE`；逐表核对行数和列画像。
+3. 每道题的标准 SQL 在两个引擎上各执行多次，比较结果（`compatibility.py`、`evaluator.py`）。
+4. 结果不一致的，查明原因，只加有文档依据、并经过结果验证的改写规则（`adapter.py`），不改原始标准 SQL。
+5. 通过的题把标准答案结果冻结到 `benchmark.gold_results`，之后判分只读冻结结果。
+
+**效果**
+
+| 阶段 | 结果 |
+|---|---|
+| 原样在两个引擎上严格比较 | 100 题中 37 题一致 |
+| 查明三类方言差异：数值表示精度、统计函数口径（MySQL 的 `STDDEV` 是总体标准差）、排名类窗口函数的窗口帧 | — |
+| 比较口径：DECIMAL 按各自精度、浮点相对误差 1e-6；补两条改写规则并逐题验证 | 可用 89 题（原样 46 + 改写 43） |
+
+**运行**
+
+**Notebook**：分支 `step-01`，`notebooks/step01_data`。notebook 里导入课程数据包（`scripts/load_course_data.py`：从 HuggingFace 下载这一步的产出，按原来的列类型和排序规则建表导入），不需要 MySQL，然后查看比对报告。
+
+本地完整流程（需要 MySQL 和 BEAVER 的 HuggingFace 访问权限）：
+
+```bash
+python scripts/fetch_beaver_db.py      # 下载并在 MySQL 还原 BEAVER（需要 HuggingFace 访问权限）
+python scripts/phase0.py               # 复制、比对、冻结标准答案
+```
+
+`data/`、`runs/` 等含 BEAVER 内容的目录不入库（见 `.gitignore`）。
