@@ -15,7 +15,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install -q -r ../requirements-notebook.txt
+# MAGIC %pip install -q -r requirements-notebook.txt
 
 # COMMAND ----------
 
