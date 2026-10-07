@@ -5,4 +5,8 @@ databricks-sql-connector>=3.0
 huggingface_hub>=0.30
 pytest>=8.0
 databricks-sdk>=0.60      # the preinstalled one is older: App deployment needs the current API
-protobuf>=5.29.5,<6        # satisfies databricks-sdk and the preinstalled Spark Connect (grpcio-status)
+# protobuf must satisfy both databricks-sdk and the preinstalled Spark Connect. Naming grpcio-status (no version)
+# keeps the installed one, so pip picks a protobuf its requirement allows: 5.29.x on older serverless
+# environments, the preinstalled 6.x on newer ones. Never pin protobuf to one major version here.
+grpcio-status
+protobuf>=5.29.5
