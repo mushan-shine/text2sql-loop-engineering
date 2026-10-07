@@ -10,7 +10,10 @@ Two rules are *evaluation-environment conventions*, not gold information:
   2,116/5,787 dw questions). MySQL STDDEV/STD/VARIANCE are population
   statistics, Databricks stddev/variance are sample statistics, so the prompt
   maps the MySQL names to VAR_POP / STDDEV_POP (baseline-v2; v1 only said
-  "use STDDEV_POP", which contradicted such questions).
+  "use STDDEV_POP", which contradicted such questions);
+* every string column carries the UTF8_LCASE collation, and UNION refuses to
+  combine it with a plain STRING (``CAST(NULL AS STRING)``, a string literal,
+  ``CAST(x AS STRING)``): rule 7 (v2.1 / v3.1).
 
 Few-shot examples come from dw questions outside the evaluation sample; their
 gold SQL is MySQL, so the phase-0 adapter rules are applied before use.
@@ -29,7 +32,7 @@ from agent.retriever import SchemaCatalog
 from benchmark.beaver.adapter import apply_rules
 from benchmark.beaver.dataset import AgentTask
 
-PROMPT_VERSION = "baseline-v2"
+PROMPT_VERSION = "baseline-v2.1"   # v2 + rule 7 (UTF8_LCASE in UNION)
 
 SYSTEM = ("You are an expert data analyst who writes Databricks SQL (Spark SQL dialect) "
           "for an enterprise data warehouse.")
@@ -43,7 +46,10 @@ RULES = """Rules:
    a standard deviation or variance - including when it says "use STDDEV" or "never STDDEV_POP" - write
    STDDEV_POP(...) or VAR_POP(...) in Databricks SQL. Never use STDDEV(), STD(), VARIANCE() or VAR_SAMP().
 5. Many codes, years and dates are stored as strings (for example term codes like '2014FA').
-6. Return only the columns the question asks for, in the order it mentions them."""
+6. Return only the columns the question asks for, in the order it mentions them.
+7. Every string column has the UTF8_LCASE collation. In UNION / UNION ALL, a branch that has no value for a column
+   must use a bare NULL, never CAST(NULL AS STRING). A string literal or CAST(... AS STRING) that sits opposite a
+   table string column must be written as <expression> COLLATE UTF8_LCASE."""
 
 _FENCE = re.compile(r"```(?:sql)?\s*(.+?)```", re.DOTALL | re.IGNORECASE)
 
@@ -127,7 +133,7 @@ def extract_sql(text: str) -> tuple[str, str]:
     return body.rstrip().rstrip(";").strip(), "OK"
 
 
-PROMPT_VERSION_DYNAMIC = "baseline-v3-dynfs"
+PROMPT_VERSION_DYNAMIC = "baseline-v3.1-dynfs"
 
 
 @dataclass

@@ -201,5 +201,6 @@ def test_devset_build_excludes_eval_and_few_shot_and_qualifies():
 
 def test_prompt_v2_maps_mysql_statistics():
     from agent.generator import PROMPT_VERSION, RULES
-    assert PROMPT_VERSION == "baseline-v2"
+    assert PROMPT_VERSION == "baseline-v2.1"
     assert "never STDDEV_POP" in RULES and "STDDEV_POP(...)" in RULES and "SAMPLE" in RULES
+    assert "UTF8_LCASE" in RULES and "never CAST(NULL AS STRING)" in RULES  # rule 7 (v2.1)

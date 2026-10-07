@@ -58,5 +58,5 @@ def test_generator_adds_notes_and_versions_the_prompt(tmp_path):
     chat = Chat()
     gen = FewShotGenerator(chat, CAT, [], knowledge=kb)
     g = gen.generate(AgentTask("dw:1", "graduate level courses for each department", "dw"), ("dept", "course_desc"))
-    assert "Warehouse usage notes" in chat.prompts[0] and g.notes and gen.prompt_version == "baseline-v2+kb"
+    assert "Warehouse usage notes" in chat.prompts[0] and g.notes and gen.prompt_version == "baseline-v2.1+kb"
     assert knowledge_for({"knowledge": {"mode": "off"}}, tmp_path) is None

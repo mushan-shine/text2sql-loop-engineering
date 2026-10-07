@@ -322,3 +322,34 @@ python scripts/build_knowledge.py                                   # 从训练�
 python scripts/phase1.py dev --few-shot dynamic --knowledge on
 python scripts/phase6.py --few-shot dynamic --knowledge on --max-repairs 4
 ```
+
+## 步骤 8：UNION 排序规则修复、提前结束
+
+**目的**：修一个在真实运行中发现、Loop 自己修不好的问题，并补上一处浪费。
+
+**现象**：开发集里有一道题，5 次尝试都报同一个错：
+
+```
+[INCOMPATIBLE_COLUMN_TYPE] UNION can only be performed on tables with compatible column types.
+... "STRING" type which is not compatible with "STRING COLLATE UTF8_LCASE" ...
+```
+
+**原因**
+
+- 步骤 1 把字符串列映射成了 `STRING COLLATE UTF8_LCASE`。模型在 UNION 里用 `CAST(NULL AS STRING)` 补空列，普通 STRING 和 UTF8_LCASE 列不兼容。在 Databricks 上实测：`CAST(NULL AS STRING)`、字符串字面量、`CAST(x AS STRING)` 都会报错，裸 `NULL` 和 `'x' COLLATE UTF8_LCASE` 可以。
+- 诊断只把它归为通用的执行错误，修复提示里没有这条知识，模型 4 轮都没改对；第 3–5 次生成的 SQL 一模一样，白白重复执行。
+
+**做法**
+
+| 改动 | 位置 |
+|---|---|
+| 生成规则加第 7 条：UNION 中补位的空列写裸 `NULL`；和字符串列对位的字面量加 `COLLATE UTF8_LCASE`。prompt 版本升为 `baseline-v2.1` / `baseline-v3.1-dynfs` | `agent/generator.py`、`skills/repair_sql.py` 的语法说明 |
+| 诊断新增规则：`INCOMPATIBLE_COLUMN_TYPE` 且报错含 `COLLATE` → 执行错误，修复线索 `collation_mismatch`（`diagnoser-v1.1`） | `loop_engineer/diagnose.py` |
+| RepairSQL 收到这条线索时先确定性地把 `CAST(NULL AS STRING)` 换成 `NULL`，不调 LLM；剩下的交给 LLM 并附专门指令 | `skills/repair_sql.py` |
+| 修复后的 SQL 与之前某次尝试相同（忽略空白和末尾分号）时提前结束，记录 `stop_reason` | `loop_engineer/controller.py` |
+
+**效果**：用那道题的真实失败 SQL 复验——诊断由规则完成，确定性替换 5 处，执行成功（21 行）。这道题的答案仍与标准答案不同，属于题意理解问题，这次的改动管不到。改动对整个开发集的影响（可执行数、提前结束节省的 token）还没有重新测。
+
+**运行**
+
+**Notebook**：分支 `step-08`，`notebooks/step08_collation_early_stop`。
