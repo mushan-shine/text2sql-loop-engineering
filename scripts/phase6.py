@@ -50,6 +50,7 @@ def main() -> None:
     ap.add_argument("--max-repairs", type=int, default=1, help="repair rounds per question (attempts = +1)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--few-shot", choices=["static", "dynamic"], help="override few_shot.mode of the config")
+    ap.add_argument("--knowledge", choices=["off", "on"], help="override knowledge.mode (warehouse usage notes)")
     ap.add_argument("--config", default="config/phase1.yaml")
     args = ap.parse_args()
     if args.split == "eval" and not args.eval:
@@ -67,6 +68,8 @@ def main() -> None:
     b, lc, fs, d = cfg["beaver"], cfg["llm"], cfg["few_shot"], cfg["databricks"]
     if args.few_shot:
         fs["mode"] = args.few_shot
+    if args.knowledge:
+        cfg.setdefault("knowledge", {})["mode"] = args.knowledge
     queries, _ = load_from_local_json(b["local_dir"], b["split"])
     eval_cases = load_cases("local_json", b["split"], int(b["sample_size"]), int(b["sample_seed"]), b["local_dir"])[0]
     eval_ids = {c.case_id.split(":", 1)[1] for c in eval_cases}
@@ -92,10 +95,12 @@ def main() -> None:
     client = CachingChatClient(inner, Path(lc["cache"]))
     policy = Policy(mode=args.policy, disabled={s for s in args.disable.split(",") if s})
     from agent.examples import build_generator_index
+    from agent.knowledge import knowledge_for
     dev_ids = {str(c["id"]) for c in load_devset(Path(cfg["dev"]["path"]))["cases"]}
     # 1. 生成器
     generator = FewShotGenerator(client, catalog, examples, index=build_generator_index(queries, eval_ids, dev_ids, fs),
-                                 k=int(fs.get("dynamic_k", 4)), max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)))
+                                 k=int(fs.get("dynamic_k", 4)), max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)),
+                                 knowledge=knowledge_for(cfg, ROOT))
     # 2. 循环控制器
     controller = LoopController(BM25TableRetriever(catalog), generator, dbx,
                                 Diagnoser(catalog, client), policy, RepairContext(catalog, client, examples),
@@ -108,6 +113,7 @@ def main() -> None:
     meta = {"split": args.split, "strategy": args.strategy, "verifier": args.verifier,
             "upper_bound": args.verifier == "oracle", "policy": args.policy, "disabled": args.disable,
             "self_signals": list(SELF_SIGNALS), "verifier_version": VERIFIER_VERSION, "model": inner.model, "provider": inner.provider, "prompt_version": generator.prompt_version, "few_shot": fs.get("mode", "static"),
+            "knowledge": (cfg.get("knowledge") or {}).get("mode", "off"),
             "diagnoser": DIAGNOSER_VERSION, "max_attempts": args.max_repairs + 1,
             "case_ids": [c.case_id for c in cases]}
     

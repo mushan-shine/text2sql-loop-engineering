@@ -79,6 +79,7 @@ def main() -> None:
     ap.add_argument("mode", choices=["build-dev", "dev", "pilot", "baseline"])
     ap.add_argument("--config", default="config/phase1.yaml")
     ap.add_argument("--few-shot", choices=["static", "dynamic"], help="override few_shot.mode of the config")
+    ap.add_argument("--knowledge", choices=["off", "on"], help="override knowledge.mode (warehouse usage notes)")
     ap.add_argument("--limit", type=int, help="only the first N selected cases (smoke test)")
     ap.add_argument("--no-cache", action="store_true", help="do not replay cached LLM responses")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -93,6 +94,8 @@ def main() -> None:
     b, lc, fs = cfg["beaver"], cfg["llm"], cfg["few_shot"]
     if args.few_shot:
         fs["mode"] = args.few_shot
+    if args.knowledge:
+        cfg.setdefault("knowledge", {})["mode"] = args.knowledge
 
     queries, tables_meta = load_from_local_json(b["local_dir"], b["split"])
     cases, _, _ = load_cases("local_json", b["split"], int(b["sample_size"]), int(b["sample_seed"]), b["local_dir"])
@@ -141,8 +144,10 @@ def main() -> None:
     from agent.examples import build_generator_index
     dev_ids = {str(c["id"]) for c in load_devset(dev_path)["cases"]} if dev_path.exists() else set()
     index = build_generator_index(queries, eval_raw_ids, dev_ids, fs)
+    from agent.knowledge import knowledge_for
     generator = FewShotGenerator(chat, catalog, examples, index=index, k=int(fs.get("dynamic_k", 4)),
-                                 max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)))
+                                 max_extra_tables=int(fs.get("dynamic_max_extra_tables", 6)),
+                                 knowledge=knowledge_for(cfg, ROOT))
     retriever = BM25TableRetriever(catalog)
 
     log.info("mode=%s cases=%d model=%s top_k=%s few_shot=%d", args.mode, len(selected), client.model,
